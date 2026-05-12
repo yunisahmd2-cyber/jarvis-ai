@@ -14,7 +14,7 @@ from backend.app.core.logging import get_logger
 from backend.app.services.actions.service import SAFE_SITE_SHORTCUTS, action_service
 from backend.app.services.confirmations.service import confirmation_service
 from backend.app.services.integrations.service import integration_service
-from backend.app.services.llm.ollama import ollama_service
+from backend.app.services.llm.provider import llm_provider_service
 from backend.app.services.memory.service import memory_service
 from backend.app.services.reminders.service import reminder_service
 from backend.app.services.session.service import session_service
@@ -404,7 +404,7 @@ class AssistantService:
             "Be warm, precise, and quietly confident. "
             "If you use an honorific, use sir only. Never use madam or ma'am. "
             "Avoid rambling. Prefer short, direct responses unless the user asks for depth. "
-            "Use the configured llama-family model only. "
+            "Use the configured assistant model without pretending cloud responses are local. "
             "Treat desktop actions like real system actions: be precise, safe, and confirmation-aware. "
             "Never claim an action succeeded unless the action layer verified or clearly confirmed it. "
             "If a task clearly needs several safe steps, plan them briefly and execute them in order. "
@@ -507,13 +507,17 @@ class AssistantService:
             if screen_context:
                 prompt = f"{user_text}\n\nScreen context:\n{screen_context['summary']}"
             llm_started = time.perf_counter()
-            reply_text = await ollama_service.generate(
+            llm_result = await llm_provider_service.generate(
                 prompt=prompt,
                 system_prompt=self.build_system_prompt(),
                 history=history,
                 mode=memory_service.get_power_mode(),
             )
+            reply_text = llm_result.text
             llm_ms = (time.perf_counter() - llm_started) * 1000
+            metadata = {"source": llm_result.source}
+            if llm_result.fallback_reason:
+                metadata["fallback_reason"] = llm_result.fallback_reason
             response: dict[str, Any] = {
                 "session_id": active_session_id,
                 "text": self._polish_reply(reply_text),
@@ -522,7 +526,7 @@ class AssistantService:
                 "confirmation_id": None,
                 "action_preview": None,
                 "memory_updated": False,
-                "metadata": {"source": "ollama"},
+                "metadata": metadata,
             }
         else:
             response = routed

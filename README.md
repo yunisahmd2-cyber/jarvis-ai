@@ -5,7 +5,7 @@ A local, macOS-focused desktop assistant with a cinematic orb-first interface, b
 ## Status
 
 - Experimental project
-- Local-first (no cloud backend or paid API required for core assistant flow)
+- Local-first with optional Mistral API fallback when the local model is unavailable
 - macOS-focused
 - Stability and honest behavior are prioritized over flashy demos
 
@@ -13,7 +13,7 @@ A local, macOS-focused desktop assistant with a cinematic orb-first interface, b
 
 - Runs a native desktop assistant UI (Tauri) with an orb-first interaction model
 - Accepts voice input, routes intent, and returns spoken/text responses
-- Uses a local Ollama llama-family model (`llama3.1:8b`) for assistant reasoning
+- Uses configurable assistant reasoning: local Ollama first, with optional Mistral API fallback
 - Performs bounded desktop actions with confirmation gates for risky operations
 - Maintains context with reminders, memory/preferences, and app/page awareness
 
@@ -23,7 +23,8 @@ A local, macOS-focused desktop assistant with a cinematic orb-first interface, b
   - STT via `faster-whisper`
   - TTS with free Edge TTS preferred for realistic voice output; macOS `say` and local Piper remain fallback options
 - **Assistant orchestration**
-  - Local Ollama responses (`llama3.1:8b`)
+  - Local Ollama responses (`llama3.1:8b`) by default
+  - Optional Mistral fallback when local Ollama is unavailable or empty
   - Bounded command chaining with stop-on-failure behavior
   - Lightweight session follow-up handling for simple references like "it" and clarification replies
   - Session command history for simple "what did I just ask?" and safe repeat flows
@@ -56,7 +57,7 @@ A local, macOS-focused desktop assistant with a cinematic orb-first interface, b
 - Some macOS actions cannot always be fully verified; those return `attempted_unverified`.
 - Jarvis can open safe search URLs, but it does not safely click or choose the "first result" yet.
 - Brightness control is not currently wired into the safe action layer.
-- Ollama and backend services must be running for full assistant behavior.
+- Backend must be running for assistant behavior; Ollama should remain available as the primary local model.
 - Several capabilities depend on macOS permissions (Microphone, Screen Recording, Automation/Accessibility).
 - This is a local experimental assistant, not a finished commercial system.
 
@@ -65,8 +66,8 @@ A local, macOS-focused desktop assistant with a cinematic orb-first interface, b
 - **Desktop app shell:** Tauri (Rust + WebView)
 - **Frontend:** TypeScript
 - **Backend:** FastAPI (Python)
-- **LLM runtime:** Ollama (local)
-- **Model profile:** llama-family (`llama3.1:8b`)
+- **LLM runtime:** Ollama local primary; optional Mistral API fallback
+- **Model profile:** Ollama primary must stay llama-family (`llama3.1:8b`); Mistral fallback is configurable via `.env`
 - **STT:** faster-whisper
 - **TTS:** free Edge TTS preferred; macOS `say` and local Piper are fallback options
 
@@ -101,6 +102,7 @@ jarvis-ai/
 - Rust + Cargo (for Tauri dev/build)
 - Ollama installed locally
 - Ollama model available: `llama3.1:8b`
+- Optional Mistral API key if `LLM_PRIMARY_PROVIDER=mistral`
 
 ## Quick Start
 
@@ -114,6 +116,14 @@ cp .env.example .env
 ollama pull llama3.1:8b
 ./scripts/doctor.sh
 ./scripts/start_jarvis.sh
+```
+
+To use Mistral as a fallback when local Ollama is unavailable, keep Ollama as primary and set these in your ignored local `.env`:
+
+```bash
+LLM_PRIMARY_PROVIDER=ollama
+MISTRAL_MODEL=mistral-small-latest
+MISTRAL_API_KEY=your_mistral_api_key_here
 ```
 
 ## Running (Desktop App)
@@ -200,6 +210,7 @@ Risky actions require explicit confirmation; safer bounded actions can execute d
   - Verify backend health endpoint: `http://127.0.0.1:8000/health`
 - **No LLM response**
   - Ensure Ollama is running and `llama3.1:8b` is available
+  - If relying on fallback, verify `MISTRAL_API_KEY` is set in `.env`
 - **Voice input not working**
   - Verify macOS microphone permission
 - **Screen inspection issues**

@@ -13,6 +13,7 @@ from backend.app.core.config import Settings, reset_settings_cache
 from backend.app.services.actions.service import action_service
 from backend.app.services.integrations.service import integration_service
 from backend.app.services.llm.ollama import ollama_service
+from backend.app.services.llm.provider import llm_provider_service
 from backend.app.services.memory.service import memory_service
 from backend.app.services.reminders.service import reminder_service
 from backend.app.services.tts.service import tts_service
@@ -33,6 +34,15 @@ def test_config_rejects_non_llama_model():
     except ValidationError:
         return
     raise AssertionError("Expected a validation error for a non-llama model")
+
+
+def test_config_accepts_ollama_primary_with_mistral_fallback():
+    settings = Settings(llm_primary_provider="ollama", mistral_api_key="test-key")
+    assert settings.llm_primary_provider == "ollama"
+    assert settings.active_llm_model == "llama3.1:8b"
+    assert settings.ollama_model == "llama3.1:8b"
+    assert settings.safe_summary()["mistral_configured"] is True
+    assert "mistral_api_key" not in settings.safe_summary()
 
 
 def test_voice_silence_default_is_low_latency():
@@ -213,6 +223,122 @@ def test_ollama_basic_mode_keeps_prompt_context_small(monkeypatch):
     assert payload["options"]["num_ctx"] == 2048
     assert "message 5" not in payload["prompt"]
     assert "message 6" in payload["prompt"]
+
+
+def test_llm_provider_uses_mistral_primary(monkeypatch):
+    monkeypatch.setenv("LLM_PRIMARY_PROVIDER", "mistral")
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
+    reset_settings_cache()
+
+    async def fake_mistral_generate(*, prompt, system_prompt, history, mode):
+        return "mistral reply"
+
+    async def fail_ollama_generate(*, prompt, system_prompt, history, mode):
+        raise AssertionError("Ollama should not run when Mistral succeeds")
+
+    monkeypatch.setattr("backend.app.services.llm.provider.mistral_service.generate", fake_mistral_generate)
+    monkeypatch.setattr("backend.app.services.llm.provider.ollama_service.generate", fail_ollama_generate)
+
+    result = asyncio.run(
+        llm_provider_service.generate(
+            prompt="hello",
+            system_prompt="You are Jarvis.",
+            history=[],
+            mode="basic",
+        )
+    )
+
+    assert result.text == "mistral reply"
+    assert result.source == "mistral"
+    assert result.fallback_reason is None
+    reset_settings_cache()
+
+
+def test_llm_provider_falls_back_to_ollama_when_mistral_fails(monkeypatch):
+    monkeypatch.setenv("LLM_PRIMARY_PROVIDER", "mistral")
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
+    reset_settings_cache()
+
+    async def fail_mistral_generate(*, prompt, system_prompt, history, mode):
+        raise RuntimeError("mistral unavailable")
+
+    async def fake_ollama_generate(*, prompt, system_prompt, history, mode):
+        return "local fallback reply"
+
+    monkeypatch.setattr("backend.app.services.llm.provider.mistral_service.generate", fail_mistral_generate)
+    monkeypatch.setattr("backend.app.services.llm.provider.ollama_service.generate", fake_ollama_generate)
+
+    result = asyncio.run(
+        llm_provider_service.generate(
+            prompt="hello",
+            system_prompt="You are Jarvis.",
+            history=[],
+            mode="basic",
+        )
+    )
+
+    assert result.text == "local fallback reply"
+    assert result.source == "ollama"
+    assert result.fallback_reason == "RuntimeError"
+    reset_settings_cache()
+
+
+def test_llm_provider_uses_ollama_primary_before_mistral(monkeypatch):
+    monkeypatch.setenv("LLM_PRIMARY_PROVIDER", "ollama")
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
+    reset_settings_cache()
+
+    async def fake_ollama_generate(*, prompt, system_prompt, history, mode):
+        return "local primary reply"
+
+    async def fail_mistral_generate(*, prompt, system_prompt, history, mode):
+        raise AssertionError("Mistral should not run when Ollama succeeds")
+
+    monkeypatch.setattr("backend.app.services.llm.provider.ollama_service.generate", fake_ollama_generate)
+    monkeypatch.setattr("backend.app.services.llm.provider.mistral_service.generate", fail_mistral_generate)
+
+    result = asyncio.run(
+        llm_provider_service.generate(
+            prompt="hello",
+            system_prompt="You are Jarvis.",
+            history=[],
+            mode="basic",
+        )
+    )
+
+    assert result.text == "local primary reply"
+    assert result.source == "ollama"
+    assert result.fallback_reason is None
+    reset_settings_cache()
+
+
+def test_llm_provider_falls_back_to_mistral_when_ollama_unreachable(monkeypatch):
+    monkeypatch.setenv("LLM_PRIMARY_PROVIDER", "ollama")
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
+    reset_settings_cache()
+
+    async def fake_ollama_generate(*, prompt, system_prompt, history, mode):
+        return "I can't reach the local Ollama service right now. Please wait a moment and try again."
+
+    async def fake_mistral_generate(*, prompt, system_prompt, history, mode):
+        return "cloud fallback reply"
+
+    monkeypatch.setattr("backend.app.services.llm.provider.ollama_service.generate", fake_ollama_generate)
+    monkeypatch.setattr("backend.app.services.llm.provider.mistral_service.generate", fake_mistral_generate)
+
+    result = asyncio.run(
+        llm_provider_service.generate(
+            prompt="hello",
+            system_prompt="You are Jarvis.",
+            history=[],
+            mode="basic",
+        )
+    )
+
+    assert result.text == "cloud fallback reply"
+    assert result.source == "mistral"
+    assert result.fallback_reason == "ollama_unreachable"
+    reset_settings_cache()
 
 
 def test_memory_routes(client):

@@ -17,7 +17,9 @@ def client(tmp_path: Path) -> TestClient:
     os.environ["AUDIO_DIR"] = str(audio_dir)
     os.environ["WORKSPACE_DIR"] = str(workspace_dir)
     os.environ["FRONTEND_BACKEND_URL"] = "http://127.0.0.1:8000"
+    os.environ["LLM_PRIMARY_PROVIDER"] = "ollama"
     os.environ["OLLAMA_MODEL"] = "llama3.1:8b"
+    os.environ.pop("MISTRAL_API_KEY", None)
 
     from backend.app.core.config import reset_settings_cache
 

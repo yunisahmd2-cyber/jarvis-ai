@@ -20,8 +20,12 @@ class Settings(BaseModel):
     app_port: int = 8000
     cors_origins_raw: str = Field(default="http://localhost:5173,http://127.0.0.1:5173,tauri://localhost")
     database_url: str = f"sqlite:///{(DATA_DIR / 'jarvis.db').as_posix()}"
+    llm_primary_provider: str = "ollama"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "llama3.1:8b"
+    mistral_base_url: str = "https://api.mistral.ai/v1"
+    mistral_model: str = "mistral-small-latest"
+    mistral_api_key: str = ""
     stt_provider: str = "faster-whisper"
     tts_provider: str = "edge"
     default_voice_name: str = "Daniel"
@@ -71,6 +75,14 @@ class Settings(BaseModel):
             raise ValueError("OLLAMA_MODEL must remain a llama-family model for this project")
         return model
 
+    @field_validator("llm_primary_provider")
+    @classmethod
+    def validate_llm_primary_provider(cls, value: str) -> str:
+        provider = value.strip().lower()
+        if provider not in {"ollama", "mistral"}:
+            raise ValueError("LLM_PRIMARY_PROVIDER must be 'ollama' or 'mistral'")
+        return provider
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, value: str) -> str:
@@ -91,6 +103,12 @@ class Settings(BaseModel):
         return Path(self.database_url.removeprefix("sqlite:///"))
 
     @property
+    def active_llm_model(self) -> str:
+        if self.llm_primary_provider == "mistral" and self.mistral_api_key.strip():
+            return self.mistral_model
+        return self.ollama_model
+
+    @property
     def audio_path(self) -> Path:
         path = Path(self.audio_dir)
         path.mkdir(parents=True, exist_ok=True)
@@ -108,8 +126,12 @@ class Settings(BaseModel):
             "app_host": self.app_host,
             "app_port": self.app_port,
             "database_url": self.database_url,
+            "llm_primary_provider": self.llm_primary_provider,
             "ollama_base_url": self.ollama_base_url,
             "ollama_model": self.ollama_model,
+            "mistral_base_url": self.mistral_base_url,
+            "mistral_model": self.mistral_model,
+            "mistral_configured": bool(self.mistral_api_key.strip()),
             "stt_provider": self.stt_provider,
             "tts_provider": self.tts_provider,
             "default_voice_name": self.default_voice_name,
@@ -136,8 +158,12 @@ def get_settings() -> Settings:
         "app_port": int(env.get("APP_PORT", "8000")),
         "cors_origins_raw": env.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,tauri://localhost"),
         "database_url": env.get("DATABASE_URL", f"sqlite:///{(DATA_DIR / 'jarvis.db').as_posix()}"),
+        "llm_primary_provider": env.get("LLM_PRIMARY_PROVIDER", "ollama"),
         "ollama_base_url": env.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
         "ollama_model": env.get("OLLAMA_MODEL", "llama3.1:8b"),
+        "mistral_base_url": env.get("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
+        "mistral_model": env.get("MISTRAL_MODEL", "mistral-small-latest"),
+        "mistral_api_key": env.get("MISTRAL_API_KEY", ""),
         "stt_provider": env.get("STT_PROVIDER", "faster-whisper"),
         "tts_provider": env.get("TTS_PROVIDER", "edge"),
         "default_voice_name": env.get("DEFAULT_VOICE_NAME", "Daniel"),

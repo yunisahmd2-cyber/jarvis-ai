@@ -14,4 +14,4 @@ router = APIRouter(tags=["health"])
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     settings = get_settings()
-    return HealthResponse(time=datetime.now(UTC), version="1.0.0", model=settings.ollama_model)
+    return HealthResponse(time=datetime.now(UTC), version="1.0.0", model=settings.active_llm_model)
