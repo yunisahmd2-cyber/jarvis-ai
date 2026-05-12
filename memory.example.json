@@ -1,0 +1,10 @@
+{
+  "model_name": "llama3.1:8b",
+  "power_mode": "basic",
+  "voice_mode": "realistic",
+  "personality": "professional",
+  "location": "",
+  "allowed_commands_only": true,
+  "background_mode": false,
+  "context_window": []
+}

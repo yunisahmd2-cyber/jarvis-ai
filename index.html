@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JARVIS</title>
+</head>
+<body>
+  <div id="boot-sequence" aria-hidden="true">
+    <div id="boot-mark">JARVIS</div>
+    <div id="boot-title">SYSTEMS INITIALIZING</div>
+    <div id="boot-line-primary">bringing subsystems online…</div>
+    <div id="boot-line-secondary">verifying local inference, voice, and desktop control</div>
+  </div>
+  <canvas id="orb-canvas"></canvas>
+  <button id="orb-hit-area" aria-label="Activate Jarvis"></button>
+
+  <div id="status-text"></div>
+  <div id="jarvis-label">JARVIS SYSTEMS</div>
+  <div id="error-text"></div>
+
+  <button id="btn-mute" aria-label="Mute">Mute</button>
+  <button id="btn-menu" aria-label="Menu">Menu</button>
+
+  <div id="menu-dropdown" style="display:none">
+    <button id="btn-end-session">End Session</button>
+    <button id="btn-mission-toggle">Mission Control</button>
+    <button id="btn-transcript-toggle">Transcript</button>
+  </div>
+
+  <div id="confirmation-overlay" class="hidden" aria-hidden="true">
+    <div id="confirmation-card">
+      <div id="confirmation-title">Authorization Required</div>
+      <div id="confirmation-reason"></div>
+      <div id="confirmation-text"></div>
+      <div id="confirmation-actions">
+        <button id="btn-confirm-cancel">Cancel</button>
+        <button id="btn-confirm-approve">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <aside id="transcript-panel" class="hidden" aria-hidden="true">
+    <div id="transcript-header">
+      <span>Session Feed</span>
+      <button id="btn-transcript-close">Close</button>
+    </div>
+    <div id="transcript-body"></div>
+  </aside>
+
+  <aside id="mission-panel" class="hidden" aria-hidden="true">
+    <div id="mission-header">
+      <div id="mission-heading">
+        <span>Mission Control</span>
+        <span id="mission-subtitle">Context systems standby</span>
+      </div>
+      <div id="mission-actions">
+        <button id="btn-mission-speak">Speak Briefing</button>
+        <button id="btn-mission-inspect">Inspect Screen</button>
+        <button id="btn-mission-refresh">Refresh</button>
+        <button id="btn-mission-close">Close</button>
+      </div>
+    </div>
+    <div id="mission-body">
+      <section class="mission-section">
+        <div class="mission-title">Briefing</div>
+        <div id="mission-briefing" class="mission-content">Loading…</div>
+      </section>
+      <section class="mission-section">
+        <div class="mission-title">System</div>
+        <div id="mission-system" class="mission-content">Loading…</div>
+      </section>
+      <section class="mission-section">
+        <div class="mission-title">Active Context</div>
+        <div id="mission-context" class="mission-content">Loading…</div>
+      </section>
+      <section class="mission-section">
+        <div class="mission-title">Suggested Actions</div>
+        <div id="mission-suggestions" class="mission-content">Loading…</div>
+      </section>
+      <section class="mission-section">
+        <div class="mission-title">Inspection</div>
+        <div id="mission-inspection" class="mission-content">No inspection captured yet.</div>
+      </section>
+      <section class="mission-section">
+        <div class="mission-title">Spotify</div>
+        <div id="mission-spotify" class="mission-content">Loading…</div>
+      </section>
+      <section class="mission-grid">
+        <section class="mission-section">
+          <div class="mission-title">Weather</div>
+          <div id="mission-weather" class="mission-content">Loading…</div>
+        </section>
+        <section class="mission-section">
+          <div class="mission-title">News</div>
+          <div id="mission-news" class="mission-content">Loading…</div>
+        </section>
+      </section>
+      <section class="mission-section">
+        <div class="mission-title">Capabilities</div>
+        <div id="mission-capabilities" class="mission-content">Loading…</div>
+      </section>
+    </div>
+  </aside>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

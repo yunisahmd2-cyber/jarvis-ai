@@ -1,0 +1,25 @@
+{
+  "name": "jarvis",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --strictPort",
+    "dev:frontend": "vite --host 127.0.0.1 --strictPort",
+    "dev:backend": "./scripts/run_backend.sh",
+    "dev:tauri": "tauri dev",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/three": "^0.184.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.8"
+  },
+  "dependencies": {
+    "@tauri-apps/plugin-websocket": "^2.4.2",
+    "three": "^0.184.0"
+  }
+}
