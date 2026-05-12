@@ -107,6 +107,28 @@ class MemoryService:
             item["updated_at"] = datetime.fromisoformat(str(item["updated_at"]))
         return results
 
+    def list_by_category(self, category: str, limit: int = 20) -> list[dict[str, object]]:
+        with get_connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT key, value, category, updated_at
+                FROM memories
+                WHERE category = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (category, limit),
+            ).fetchall()
+        results = [row_to_dict(row) for row in rows]
+        for item in results:
+            item["updated_at"] = datetime.fromisoformat(str(item["updated_at"]))
+        return results
+
+    def delete_memory(self, key: str) -> bool:
+        with get_connection() as connection:
+            cursor = connection.execute("DELETE FROM memories WHERE key = ?", (key,))
+            return cursor.rowcount > 0
+
     def list_preferences(self) -> list[dict[str, object]]:
         with get_connection() as connection:
             rows = connection.execute(

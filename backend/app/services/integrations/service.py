@@ -106,12 +106,45 @@ class IntegrationService:
             "charging": "AC Power" in proc.stdout or "charging" in proc.stdout.lower(),
         }
 
+    def _read_top_processes(self, limit: int = 5) -> list[dict[str, object]]:
+        try:
+            proc = subprocess.run(
+                ["ps", "-arcwwwxo", "pid,comm,%cpu,%mem"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        except Exception:
+            logger.debug("Top process read failed", exc_info=True)
+            return []
+        processes: list[dict[str, object]] = []
+        for line in proc.stdout.splitlines()[1:]:
+            parts = line.split(None, 3)
+            if len(parts) < 4:
+                continue
+            try:
+                processes.append(
+                    {
+                        "pid": int(parts[0]),
+                        "name": parts[1],
+                        "cpu_percent": float(parts[2]),
+                        "memory_percent": float(parts[3]),
+                    }
+                )
+            except ValueError:
+                continue
+            if len(processes) >= limit:
+                break
+        return processes
+
     def system_status(self) -> dict[str, object]:
         try:
             cpu = self._read_cpu_usage()
             memory = self._read_memory_usage()
             disk_usage = shutil.disk_usage("/")
             battery = self._read_battery()
+            top_processes = self._read_top_processes()
         except Exception as exc:
             logger.exception("System status read failed")
             return {
@@ -150,6 +183,11 @@ class IntegrationService:
         if not notes:
             notes.append("No obvious local resource pressure stands out from these readings.")
         if any(term in " ".join(notes).lower() for term in ("high", "full", "low")):
+            if top_processes:
+                top = top_processes[0]
+                notes.append(
+                    f"Top visible process sample: {top['name']} using about {top['cpu_percent']}% CPU."
+                )
             notes.append("I cannot identify the exact process cause from this check alone.")
         interpretation = " ".join(notes)
         return {
@@ -164,6 +202,7 @@ class IntegrationService:
                 "used_percent": disk_percent,
             },
             "battery": battery,
+            "top_processes": top_processes,
             "interpretation": interpretation,
             "summary": f"{cpu_text}. {memory_text}; {disk_text}.{battery_text} {interpretation}{precision_note}",
         }

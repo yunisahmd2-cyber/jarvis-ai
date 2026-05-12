@@ -29,6 +29,7 @@ A local, macOS-focused desktop assistant with a cinematic orb-first interface, b
   - Lightweight session follow-up handling for simple references like "it" and clarification replies
   - Session command history for simple "what did I just ask?" and safe repeat flows
   - Lightweight response-style preferences such as concise, normal, detailed, casual, and professional
+  - Natural command wrappers such as "check ..." and "tell me ..." for existing safe capabilities
 - **Desktop control**
   - App open/switch/close flows (allowlist-driven)
   - Safe media/volume controls where macOS or Spotify control is available
@@ -38,12 +39,14 @@ A local, macOS-focused desktop assistant with a cinematic orb-first interface, b
   - Active app awareness
   - Browser/page awareness helpers
   - Spotify status/control integration
-  - Request-based CPU/RAM/disk/battery status with simple interpretation when available
+  - Request-based CPU/RAM/disk/battery/top-process status with simple interpretation when available
 - **Vision/screen context**
   - Screenshot capture through Tauri
   - OCR/metadata fallback structure (non-semantic)
 - **Productivity**
   - Reminders (create/list/due/complete)
+  - Passive local session timers (create/status/cancel; no background loop)
+  - Local notes stored in SQLite-backed memory
   - Memory/preferences persistence
   - Basic Mode / Advanced Mode behavior profile
 - **UI direction**
@@ -56,6 +59,7 @@ A local, macOS-focused desktop assistant with a cinematic orb-first interface, b
 - Vision is **not** true semantic visual understanding; current flow is OCR/metadata-oriented fallback.
 - Some macOS actions cannot always be fully verified; those return `attempted_unverified`.
 - Jarvis can open safe search URLs, but it does not safely click or choose the "first result" yet.
+- Timers are passive/session-local in this version; they can be queried or cancelled, but they do not run a heavy background alarm loop.
 - Brightness control is not currently wired into the safe action layer.
 - Backend must be running for assistant behavior; Ollama should remain available as the primary local model.
 - Several capabilities depend on macOS permissions (Microphone, Screen Recording, Automation/Accessibility).
@@ -217,6 +221,24 @@ Risky actions require explicit confirmation; safer bounded actions can execute d
   - Verify Screen Recording permission
 - **App/browser control issues**
   - Verify Automation/Accessibility permissions
+
+Example commands now covered by fast local routing:
+
+```text
+can you open Spotify
+please launch Safari
+go back to Spotify
+pause the music
+turn the volume up
+check what song is playing
+what's using my Mac?
+tell me my battery
+set a timer for 5 minutes
+how much time is left
+take a note: inspect the reactor
+show my notes
+delete note 1
+```
 
 Sanity checks:
 

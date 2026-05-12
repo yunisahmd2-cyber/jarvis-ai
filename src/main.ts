@@ -321,7 +321,7 @@ function startBackendListening() {
     .voiceRespond(sessionId)
     .then(async (response) => {
       if (cycleId !== activeVoiceCycleId) return;
-      await processAssistantResponse(response);
+      await processAssistantResponse(response, cycleId);
     })
     .catch((error) => {
       if (cycleId !== activeVoiceCycleId) return;
@@ -369,7 +369,7 @@ function startFollowUpListening() {
     .voiceRespond(sessionId)
     .then(async (response) => {
       if (cycleId !== activeVoiceCycleId) return;
-      await processAssistantResponse(response);
+      await processAssistantResponse(response, cycleId);
     })
     .catch((error) => {
       if (cycleId !== activeVoiceCycleId) return;
@@ -625,7 +625,10 @@ function missionStatusFlag(ok: boolean, label: string) {
   return ok ? `${label}: online` : `${label}: limited`;
 }
 
-async function processAssistantResponse(response: AssistantApiResponse) {
+async function processAssistantResponse(response: AssistantApiResponse, expectedCycleId?: number) {
+  if (expectedCycleId !== undefined && expectedCycleId !== activeVoiceCycleId) {
+    return;
+  }
   clearThinkingTimer();
   clearResponseTimeout();
   micVisualizer.stop();
@@ -641,11 +644,18 @@ async function processAssistantResponse(response: AssistantApiResponse) {
     return;
   }
 
+  if (expectedCycleId !== undefined && expectedCycleId !== activeVoiceCycleId) {
+    return;
+  }
+
   if (response.text) {
     transcriptStore.add("assistant", response.text);
   }
 
   if (response.audio_url) {
+    if (expectedCycleId !== undefined && expectedCycleId !== activeVoiceCycleId) {
+      return;
+    }
     isBusy = true;
     shouldFollowUp = Boolean(response.follow_up);
     if (!audioPlayer.isPlaying()) {

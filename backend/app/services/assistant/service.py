@@ -19,6 +19,7 @@ from backend.app.services.memory.service import memory_service
 from backend.app.services.reminders.service import reminder_service
 from backend.app.services.session.service import session_service
 from backend.app.services.tts.service import tts_service
+from backend.app.services.timers.service import timer_service
 from backend.app.services.vision.service import vision_service
 from backend.app.services.voice.wakeword import wake_word_service
 
@@ -375,6 +376,24 @@ class AssistantService:
             },
         )
 
+    def _parse_timer_duration(self, text: str) -> tuple[int, str] | None:
+        match = re.search(r"(\d+)\s*(second|seconds|minute|minutes|hour|hours)", text.lower())
+        if not match:
+            return None
+        amount = int(match.group(1))
+        unit = match.group(2)
+        seconds = amount * 3600 if unit.startswith("hour") else amount * 60 if unit.startswith("minute") else amount
+        label = re.sub(r"^(?:set|start)\s+(?:a\s+)?timer(?:\s+for)?\s+", "", text, flags=re.IGNORECASE).strip(" .")
+        label = re.sub(r"\b\d+\s*(?:second|seconds|minute|minutes|hour|hours)\b", "", label, flags=re.IGNORECASE).strip(" .")
+        return seconds, label or "timer"
+
+    def _format_note_list(self) -> str:
+        notes = memory_service.list_by_category("note", limit=5)
+        if not notes:
+            return "You have no saved notes."
+        lines = [f"{index + 1}. {str(item['value'])[:140]}" for index, item in enumerate(notes)]
+        return "Your latest notes: " + " ".join(lines)
+
     def build_system_prompt(self) -> str:
         preferences = memory_service.list_preferences()
         preference_lines = [f"{item['key']}: {item['value']}" for item in preferences[:10]]
@@ -666,6 +685,10 @@ class AssistantService:
         screen_context: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         lower = text.lower().strip()
+        if lower.startswith("check "):
+            return await self._route_single_command(self._strip_prefix(text, "check "), session_id, chain_context, screen_context)
+        if lower.startswith("tell me "):
+            return await self._route_single_command(self._strip_prefix(text, "tell me "), session_id, chain_context, screen_context)
         if lower in {"use basic mode", "switch to basic mode", "enable basic mode"}:
             memory_service.set_power_mode("basic")
             return self._simple_response(
@@ -703,6 +726,29 @@ class AssistantService:
                 memory_data = status.get("memory", {})
                 if isinstance(memory_data, dict):
                     text = f"RAM usage is {memory_data.get('used_percent')}%."
+            elif "battery" in lower:
+                battery_data = status.get("battery")
+                if isinstance(battery_data, dict):
+                    state = "charging" if battery_data.get("charging") else "not charging"
+                    text = f"Battery is at {battery_data.get('percent')}% and {state}."
+                else:
+                    text = "Battery status is unavailable on this Mac."
+            elif any(term in lower for term in ("storage", "disk")):
+                disk_data = status.get("disk", {})
+                if isinstance(disk_data, dict):
+                    free_gb = round(float(disk_data.get("free_bytes") or 0) / (1024**3), 1)
+                    text = f"Disk usage is {disk_data.get('used_percent')}%, with about {free_gb} GB free."
+            elif "using my mac" in lower or "what's using" in lower or "what is using" in lower:
+                processes = status.get("top_processes", [])
+                if isinstance(processes, list) and processes:
+                    parts = [
+                        f"{item.get('name')} at {item.get('cpu_percent')}% CPU"
+                        for item in processes[:3]
+                        if isinstance(item, dict)
+                    ]
+                    text = "Top visible processes: " + "; ".join(parts) + "."
+                else:
+                    text = "I couldn't identify top processes from this check."
             return {
                 "session_id": session_id,
                 "text": text,
@@ -764,6 +810,26 @@ class AssistantService:
                 category="memory",
             )
             return self._simple_response(session_id, "I'll remember that.", memory_updated=True, source="memory")
+        if lower.startswith("take a note:") or lower.startswith("take note:") or lower.startswith("note:"):
+            payload = re.sub(r"^(?:take a note:|take note:|note:)\s*", "", text, flags=re.IGNORECASE).strip()
+            if not payload:
+                return self._simple_response(session_id, "What should I write down?", source="note")
+            memory_service.store_memory(f"note_{datetime.now(UTC).timestamp()}", payload, "note")
+            return self._simple_response(session_id, "Noted.", memory_updated=True, source="note")
+        if lower in {"show my notes", "show notes", "list notes", "what are my notes"}:
+            return self._simple_response(session_id, self._format_note_list(), source="note")
+        if lower.startswith("delete note "):
+            index_text = self._strip_prefix(text, "delete note ").strip()
+            if not index_text.isdigit():
+                return self._simple_response(session_id, "Say the note number to delete, for example: delete note 1.", source="note")
+            notes = memory_service.list_by_category("note", limit=20)
+            index = int(index_text) - 1
+            if index < 0 or index >= len(notes):
+                return self._simple_response(session_id, "I couldn't find that note number.", source="note")
+            deleted = memory_service.delete_memory(str(notes[index]["key"]))
+            return self._simple_response(session_id, "Note deleted." if deleted else "I couldn't delete that note.", source="note")
+        if lower in {"delete that note", "delete my note", "remove that note"}:
+            return self._simple_response(session_id, "Tell me the note number first, for example: delete note 1.", source="note")
         if lower.startswith("set personality "):
             value = self._strip_prefix(text, "set personality ")
             memory_service.store_memory("personality", value, "preference")
@@ -827,6 +893,25 @@ class AssistantService:
                 "When should I remind you?",
                 source="reminder",
             )
+        if lower.startswith(("set a timer", "set timer", "start a timer", "start timer")):
+            parsed_timer = self._parse_timer_duration(text)
+            if parsed_timer is None:
+                return self._simple_response(session_id, "How long should I set the timer for?", source="timer")
+            seconds, label = parsed_timer
+            timer = timer_service.create(session_id=session_id, seconds=seconds, label=label)
+            due_at = datetime.fromisoformat(str(timer["due_at"])).astimezone()
+            return self._simple_response(
+                session_id,
+                f"Timer set for {due_at.strftime('%I:%M %p')}.",
+                source="timer",
+            )
+        if lower in {"cancel my timer", "cancel timer", "stop timer", "stop my timer"}:
+            cancelled = timer_service.cancel_latest(session_id)
+            if not cancelled:
+                return self._simple_response(session_id, "You have no active timers to cancel.", source="timer")
+            return self._simple_response(session_id, "Timer cancelled.", source="timer")
+        if lower in {"how much time is left", "how much time left", "timer status", "show timers", "list timers"}:
+            return self._simple_response(session_id, timer_service.summarize(session_id), source="timer")
         calendar_preview = self._parse_calendar_command(text)
         if calendar_preview is not None:
             if calendar_preview["action"] == "list_calendar_events":
@@ -909,6 +994,8 @@ class AssistantService:
             "media status",
             "what song is this",
             "what track is this",
+            "what song is playing",
+            "what track is playing",
         }:
             status = integration_service.spotify_status()
             if status.get("running") and status.get("player_state") != "not_running":
@@ -1210,6 +1297,14 @@ class AssistantService:
                     return self._simple_response(session_id, "Which app should I switch to?", source="clarification")
             preview = action_service.preview("switch_app", target)
             return self._confirmation_or_execute(session_id, preview)
+        if lower.startswith("go back to "):
+            target = self._normalize_app_target(self._strip_prefix(text, "go back to "))
+            if self._is_ambiguous_app_target(target):
+                target = self._resolve_recent_app_reference(session_id)
+                if not target:
+                    return self._simple_response(session_id, "Which app should I switch to?", source="clarification")
+            preview = action_service.preview("switch_app", target)
+            return self._confirmation_or_execute(session_id, preview)
         if lower.startswith("switch to "):
             target = self._normalize_app_target(self._strip_prefix(text, "switch to "))
             if self._is_ambiguous_app_target(target):
@@ -1271,10 +1366,10 @@ class AssistantService:
             payload = self._strip_prefix(text, "type this ") if lower.startswith("type this ") else self._strip_prefix(text, "type ")
             preview = action_service.preview("type_text", payload)
             return self._confirmation_or_execute(session_id, preview)
-        if lower in {"volume up", "increase volume"}:
+        if lower in {"volume up", "increase volume", "turn volume up", "turn the volume up"}:
             result = action_service.execute("volume_up")
             return self._simple_response(session_id, str(result["message"]), source="action")
-        if lower in {"volume down", "decrease volume"}:
+        if lower in {"volume down", "decrease volume", "turn volume down", "turn the volume down"}:
             result = action_service.execute("volume_down")
             return self._simple_response(session_id, str(result["message"]), source="action")
         if lower in {"mute", "mute volume", "mute sound", "mute system audio"}:
@@ -1294,7 +1389,20 @@ class AssistantService:
             level = int(level_text) if level_text else 50
             preview = action_service.preview("set_volume", str(level), {"level": level})
             return self._confirmation_or_execute(session_id, preview)
-        if lower in {"play", "pause", "play or pause", "toggle playback", "play music", "pause music", "stop music", "resume music"}:
+        if lower in {
+            "play",
+            "pause",
+            "play or pause",
+            "toggle playback",
+            "play music",
+            "play the music",
+            "pause music",
+            "pause the music",
+            "stop music",
+            "stop the music",
+            "resume music",
+            "resume the music",
+        }:
             result = action_service.execute("media_play_pause")
             return self._simple_response(session_id, str(result["message"]), source="action")
         if lower in {"pause it", "pause that", "play it", "play that"}:
@@ -1485,6 +1593,12 @@ class AssistantService:
             "wake word",
             "status ",
             "system ",
+            "check ",
+            "tell me ",
+            "start ",
+            "take ",
+            "note:",
+            "delete note ",
         )
         return lower.startswith(verbs) or lower in {
             "switch back",
@@ -1518,13 +1632,25 @@ class AssistantService:
             "how is my mac doing",
             "why is my mac slow",
             "why is my mac running slow",
+            "what's using my mac",
+            "what is using my mac",
+            "is my cpu high",
+            "is my ram high",
+            "is my battery low",
+            "my battery",
+            "battery status",
+            "how much storage do i have",
+            "how much disk space do i have",
         }
         if normalized in exact:
             return True
         cpu_query = "cpu" in normalized and any(term in normalized for term in ("load", "usage", "using"))
         memory_query = any(term in normalized for term in ("ram", "memory")) and any(term in normalized for term in ("usage", "using", "left", "free"))
+        battery_query = "battery" in normalized and any(term in normalized for term in ("low", "status", "left", "percent"))
+        storage_query = any(term in normalized for term in ("storage", "disk space", "disk usage"))
+        process_query = "using my mac" in normalized or "what's using" in normalized or "what is using" in normalized
         system_query = "system status" in normalized or "mac doing" in normalized or "mac slow" in normalized
-        return cpu_query or memory_query or system_query
+        return cpu_query or memory_query or battery_query or storage_query or process_query or system_query
 
     def _normalize_user_text(self, text: str) -> str:
         cleaned = " ".join(text.split())

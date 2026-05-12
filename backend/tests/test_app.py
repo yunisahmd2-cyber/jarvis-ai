@@ -17,6 +17,7 @@ from backend.app.services.llm.provider import llm_provider_service
 from backend.app.services.memory.service import memory_service
 from backend.app.services.reminders.service import reminder_service
 from backend.app.services.tts.service import tts_service
+from backend.app.services.timers.service import timer_service
 from backend.app.services.voice.service import voice_service
 
 
@@ -2111,6 +2112,49 @@ def test_assistant_why_mac_slow_uses_system_status(client, monkeypatch):
     assert "exact process cause" in data["text"].lower()
 
 
+def test_assistant_top_process_question_uses_system_status(client, monkeypatch):
+    monkeypatch.setattr(
+        "backend.app.services.assistant.service.integration_service.system_status",
+        lambda: {
+            "ok": True,
+            "status": "verified",
+            "summary": "CPU usage is 12.0%.",
+            "top_processes": [
+                {"name": "Safari", "cpu_percent": 12.5},
+                {"name": "Spotify", "cpu_percent": 4.0},
+            ],
+        },
+    )
+    response = client.post(
+        "/assistant/respond",
+        json={"text": "what's using my Mac?", "session_id": None, "include_audio": False},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["metadata"]["source"] == "system_status"
+    assert "safari" in data["text"].lower()
+
+
+def test_assistant_battery_question_uses_system_status(client, monkeypatch):
+    monkeypatch.setattr(
+        "backend.app.services.assistant.service.integration_service.system_status",
+        lambda: {
+            "ok": True,
+            "status": "verified",
+            "summary": "Battery is available.",
+            "battery": {"percent": 17, "charging": False},
+        },
+    )
+    response = client.post(
+        "/assistant/respond",
+        json={"text": "tell me my battery", "session_id": None, "include_audio": False},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["metadata"]["source"] == "system_status"
+    assert "17%" in data["text"]
+
+
 def test_assistant_mute_volume_routes_safe_action(client, monkeypatch):
     def fake_execute(action, target=None, params=None):
         return {
@@ -2231,6 +2275,85 @@ def test_assistant_switch_back_to_named_app(client, monkeypatch):
     assert data["confirmation_required"] is False
     assert data["action_preview"]["action"] == "switch_app"
     assert data["action_preview"]["target"] == "Spotify"
+
+
+def test_assistant_go_back_to_named_app(client, monkeypatch):
+    def fake_execute(action, target=None, params=None):
+        return {
+            "ok": True,
+            "success": True,
+            "verified": True,
+            "status": "verified",
+            "attempted": True,
+            "message": f"{target} is now frontmost.",
+            "app": target,
+        }
+
+    monkeypatch.setattr("backend.app.services.assistant.service.action_service.execute", fake_execute)
+    response = client.post(
+        "/assistant/respond",
+        json={"text": "go back to Spotify", "session_id": None, "include_audio": False},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["confirmation_required"] is False
+    assert data["action_preview"]["action"] == "switch_app"
+    assert data["action_preview"]["target"] == "Spotify"
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected_action"),
+    [
+        ("pause the music", "media_play_pause"),
+        ("turn the volume up", "volume_up"),
+        ("turn volume down", "volume_down"),
+    ],
+)
+def test_assistant_music_and_volume_natural_aliases(client, monkeypatch, prompt, expected_action):
+    calls: list[str] = []
+
+    def fake_execute(action, target=None, params=None):
+        calls.append(action)
+        return {
+            "ok": True,
+            "success": True,
+            "verified": True,
+            "status": "verified",
+            "attempted": True,
+            "message": f"{action} handled.",
+        }
+
+    monkeypatch.setattr("backend.app.services.assistant.service.action_service.execute", fake_execute)
+    response = client.post(
+        "/assistant/respond",
+        json={"text": prompt, "session_id": None, "include_audio": False},
+    )
+    assert response.status_code == 200
+    assert calls == [expected_action]
+
+
+def test_assistant_check_wrapper_routes_existing_command(client, monkeypatch):
+    monkeypatch.setattr(
+        "backend.app.services.assistant.service.integration_service.spotify_status",
+        lambda: {
+            "enabled": True,
+            "available": True,
+            "running": True,
+            "player_state": "playing",
+            "track": "Jarvis Theme",
+            "artist": "Test Artist",
+            "album": "Test Album",
+            "message": "Spotify is running.",
+        },
+    )
+    response = client.post(
+        "/assistant/respond",
+        json={"text": "check what song is playing", "session_id": None, "include_audio": False},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["metadata"]["source"] == "spotify"
+    assert "jarvis theme" in data["text"].lower()
 
 
 def test_assistant_style_preference_commands(client):
@@ -2362,6 +2485,68 @@ def test_assistant_reminder_after_school_asks_for_time(client):
     assert data["metadata"]["source"] == "reminder"
     assert "specific time" in data["text"].lower()
     assert reminder_service.list_active() == []
+
+
+def test_assistant_timer_commands_are_session_local(client):
+    first = client.post(
+        "/assistant/respond",
+        json={"text": "set a timer for 5 minutes", "session_id": "timer-session", "include_audio": False},
+    )
+    assert first.status_code == 200
+    data = first.json()
+    assert data["metadata"]["source"] == "timer"
+    assert "timer set" in data["text"].lower()
+    session_id = data["session_id"]
+    assert timer_service.active(session_id)
+
+    status = client.post(
+        "/assistant/respond",
+        json={"text": "how much time is left", "session_id": session_id, "include_audio": False},
+    )
+    assert status.status_code == 200
+    assert "active timers" in status.json()["text"].lower()
+
+    cancel = client.post(
+        "/assistant/respond",
+        json={"text": "cancel my timer", "session_id": session_id, "include_audio": False},
+    )
+    assert cancel.status_code == 200
+    assert "cancelled" in cancel.json()["text"].lower()
+    assert timer_service.active(session_id) == []
+
+
+def test_assistant_note_commands_store_and_list_locally(client):
+    note = client.post(
+        "/assistant/respond",
+        json={"text": "take a note: inspect the reactor", "session_id": "note-session", "include_audio": False},
+    )
+    assert note.status_code == 200
+    assert note.json()["metadata"]["source"] == "note"
+
+    listed = client.post(
+        "/assistant/respond",
+        json={"text": "show my notes", "session_id": "note-session", "include_audio": False},
+    )
+    assert listed.status_code == 200
+    assert "inspect the reactor" in listed.json()["text"].lower()
+
+    deleted = client.post(
+        "/assistant/respond",
+        json={"text": "delete note 1", "session_id": "note-session", "include_audio": False},
+    )
+    assert deleted.status_code == 200
+    assert "deleted" in deleted.json()["text"].lower()
+
+
+def test_assistant_delete_that_note_requires_clear_target(client):
+    response = client.post(
+        "/assistant/respond",
+        json={"text": "delete that note", "session_id": "note-session", "include_audio": False},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["metadata"]["source"] == "note"
+    assert "note number" in data["text"].lower()
 
 
 def test_assistant_calendar_command_executes_without_confirmation(client):
